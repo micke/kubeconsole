@@ -1,0 +1,246 @@
+package console
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/user"
+	"time"
+
+	"github.com/AlecAivazis/survey/v2"
+	"github.com/AlecAivazis/survey/v2/terminal"
+	"github.com/micke/kubeconsole/pkg/k8s"
+	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
+	"k8s.io/kubectl/pkg/cmd/attach"
+	"k8s.io/kubectl/pkg/cmd/exec"
+	"k8s.io/kubectl/pkg/util/interrupt"
+)
+
+var defaultAttachTimeout = 30 * time.Second
+
+// Start the console
+func Start(k8s *k8s.K8s, labelSelector string, command []string) {
+	deploymentsClient := k8s.Clientset.AppsV1().Deployments("")
+
+	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: labelSelector})
+	if err != nil {
+		panic(err)
+	}
+	deployments := list.Items
+
+	deploymentNames := make([]string, len(deployments))
+	for i, d := range deployments {
+		deploymentNames[i] = d.Name
+	}
+
+	selectedDeployment := 0
+	prompt := &survey.Select{
+		Message: "Choose a deployment:",
+		Options: deploymentNames,
+	}
+	err = survey.AskOne(prompt, &selectedDeployment)
+	if err == terminal.InterruptErr {
+		fmt.Println("Cancelled")
+		os.Exit(0)
+	} else if err != nil {
+		panic(err)
+	}
+
+	deployment := deployments[selectedDeployment]
+
+	user, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+
+	podsClient := k8s.Clientset.CoreV1().Pods(deployment.Namespace)
+	pod := &apiv1.Pod{
+		Spec:       deployment.Spec.Template.Spec,
+		ObjectMeta: deployment.Spec.Template.ObjectMeta,
+	}
+	pod.Labels["console.garbagecollect"] = "true"
+	pod.Annotations["console.creator.name"] = user.Name
+	pod.Annotations["console.creator.username"] = user.Username
+	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
+	pod.Spec.Containers[0].TTY = true
+	pod.Spec.Containers[0].Stdin = true
+
+	// Set command if one was provided
+	if len(command) > 0 {
+		pod.Spec.Containers[0].Command = command
+	}
+
+	// Set default generator name if none was one
+	if pod.GenerateName == "" {
+		pod.GenerateName = "kubeconsole-"
+	}
+
+	createdPod, err := podsClient.Create(context.TODO(), pod, metav1.CreateOptions{})
+	if err != nil {
+		panic(err)
+	}
+	defer deletePod(createdPod, podsClient)
+	printPodStatus(createdPod)
+
+	attachOpts := &attach.AttachOptions{
+		StreamOptions: exec.StreamOptions{
+			IOStreams: genericclioptions.IOStreams{
+				In:     os.Stdin,
+				Out:    os.Stdout,
+				ErrOut: os.Stderr,
+			},
+			Stdin: true,
+			TTY:   true,
+			Quiet: true,
+		},
+		GetPodTimeout: defaultAttachTimeout,
+		Attach:        &attach.DefaultRemoteAttach{},
+		Config:        k8s.RestConfig,
+		AttachFunc:    attach.DefaultAttachFunc,
+	}
+
+	err = handleAttachPod(podsClient, createdPod, attachOpts)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func deletePod(pod *apiv1.Pod, podsClient v1.PodInterface) {
+	err := podsClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
+	if err == nil {
+		fmt.Printf("Deleted %s\n", pod.Name)
+	} else {
+		fmt.Printf("Failed to delete %s\n", pod.Name)
+	}
+}
+
+func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watchtools.ConditionFunc) (*apiv1.Pod, error) {
+	// TODO: expose the timeout
+	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), 0)
+	defer cancel()
+
+	preconditionFunc := func(store cache.Store) (bool, error) {
+		_, exists, err := store.Get(&metav1.ObjectMeta{Namespace: pod.Namespace, Name: pod.Name})
+		if err != nil {
+			return true, err
+		}
+		if !exists {
+			// We need to make sure we see the object in the cache before we start waiting for events
+			// or we would be waiting for the timeout if such object didn't exist.
+			// (e.g. it was deleted before we started informers so they wouldn't even see the delete event)
+			return true, errors.NewNotFound(apiv1.Resource("pods"), pod.Name)
+		}
+
+		return false, nil
+	}
+
+	fieldSelector := fields.OneTermEqualSelector("metadata.name", pod.Name).String()
+	lw := &cache.ListWatch{
+		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fieldSelector
+			return podsClient.List(context.TODO(), options)
+		},
+		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			options.FieldSelector = fieldSelector
+			return podsClient.Watch(context.TODO(), options)
+		},
+	}
+
+	intr := interrupt.New(nil, cancel)
+	var result *apiv1.Pod
+	err := intr.Run(func() error {
+		ev, err := watchtools.UntilWithSync(ctx, lw, &apiv1.Pod{}, preconditionFunc, func(ev watch.Event) (bool, error) {
+			return exitCondition(ev)
+		})
+		if ev != nil {
+			result = ev.Object.(*apiv1.Pod)
+		}
+		return err
+	})
+
+	return result, err
+}
+
+func handleAttachPod(podsClient v1.PodInterface, pod *apiv1.Pod, attachOpts *attach.AttachOptions) error {
+	pod, err := waitForPod(podsClient, pod, podRunningAndReady)
+	if err != nil && err != ErrPodCompleted {
+		return err
+	}
+
+	if pod.Status.Phase == apiv1.PodSucceeded || pod.Status.Phase == apiv1.PodFailed {
+		return fmt.Errorf("Pod failed or ran to completion")
+	}
+
+	attachOpts.Pod = pod
+	attachOpts.PodName = pod.Name
+	attachOpts.Namespace = pod.Namespace
+
+	fmt.Print("\nAttaching...\n")
+
+	if err := attachOpts.Run(); err != nil {
+		fmt.Fprintf(attachOpts.ErrOut, "Error attaching, falling back to logs: %v\n", err)
+	}
+	return nil
+}
+
+// ErrPodCompleted is returned by PodRunning or PodContainerRunning to indicate that
+// the pod has already reached completed state.
+var ErrPodCompleted = fmt.Errorf("pod ran to completion")
+
+// podRunningAndReady returns true if the pod is running and ready, false if the pod has not
+// yet reached those states, returns ErrPodCompleted if the pod has run to completion, or
+// an error in any other case.
+func podRunningAndReady(event watch.Event) (bool, error) {
+	switch event.Type {
+	case watch.Deleted:
+		return false, errors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
+	}
+	switch t := event.Object.(type) {
+	case *apiv1.Pod:
+		printPodStatus(t)
+		switch t.Status.Phase {
+		case apiv1.PodFailed, apiv1.PodSucceeded:
+			return false, ErrPodCompleted
+		case apiv1.PodRunning:
+			conditions := t.Status.Conditions
+			if conditions == nil {
+				return false, nil
+			}
+			for i := range conditions {
+				if conditions[i].Type == apiv1.PodReady &&
+					conditions[i].Status == apiv1.ConditionTrue {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
+func printPodStatus(pod *apiv1.Pod) {
+	scheduled := false
+	ready := false
+
+	conditions := pod.Status.Conditions
+	if conditions != nil {
+		for _, c := range conditions {
+			if c.Type == apiv1.PodScheduled && c.Status == apiv1.ConditionTrue {
+				scheduled = true
+			} else if c.Type == apiv1.PodReady && c.Status == apiv1.ConditionTrue {
+				ready = true
+			}
+		}
+	}
+
+	fmt.Printf("\rCreated pod %s. Scheduled: %t, Ready: %t  ", pod.Name, scheduled, ready)
+}
