@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"strconv"
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -29,7 +31,7 @@ import (
 var defaultAttachTimeout = 30 * time.Second
 
 // Start the console
-func Start(k8s *k8s.K8s, labelSelector string, command []string) {
+func Start(k8s *k8s.K8s, labelSelector string, lifetime int, command []string) {
 	deploymentsClient := k8s.Clientset.AppsV1().Deployments("")
 
 	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: labelSelector})
@@ -68,9 +70,11 @@ func Start(k8s *k8s.K8s, labelSelector string, command []string) {
 		Spec:       deployment.Spec.Template.Spec,
 		ObjectMeta: deployment.Spec.Template.ObjectMeta,
 	}
-	pod.Labels["console.garbagecollect"] = "true"
-	pod.Annotations["console.creator.name"] = user.Name
-	pod.Annotations["console.creator.username"] = user.Username
+	pod.Labels["kubeconsole.garbagecollect"] = "true"
+	pod.Annotations["kubeconsole.creator.name"] = user.Name
+	pod.Annotations["kubeconsole.creator.username"] = user.Username
+	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
+	pod.Annotations["kubeconsole.lifetime"] = strconv.Itoa(lifetime)
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
 	pod.Spec.Containers[0].TTY = true
 	pod.Spec.Containers[0].Stdin = true
@@ -91,6 +95,7 @@ func Start(k8s *k8s.K8s, labelSelector string, command []string) {
 	}
 	defer deletePod(createdPod, podsClient)
 	printPodStatus(createdPod)
+	scheduleHeartbeat(createdPod, podsClient)
 
 	attachOpts := &attach.AttachOptions{
 		StreamOptions: exec.StreamOptions{
@@ -243,4 +248,29 @@ func printPodStatus(pod *apiv1.Pod) {
 	}
 
 	fmt.Printf("\rCreated pod %s. Scheduled: %t, Ready: %t  ", pod.Name, scheduled, ready)
+}
+
+func heartbeat(pod *apiv1.Pod, podsClient v1.PodInterface) error {
+	patch := fmt.Sprintf(
+		`{"metadata":{"annotations":{"kubeconsole.heartbeat":"%s"}}}`,
+		time.Now().Format(time.RFC3339),
+	)
+
+	_, err := podsClient.Patch(context.TODO(), pod.Name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	if err != nil {
+		fmt.Printf("Error updating heartbeat on pod: %+v\n", err)
+		return err
+	}
+
+	return nil
+}
+
+func scheduleHeartbeat(pod *apiv1.Pod, podsClient v1.PodInterface) {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for t := range ticker.C {
+			_ = t
+			heartbeat(pod, podsClient)
+		}
+	}()
 }

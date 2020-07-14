@@ -15,6 +15,7 @@ import (
 var config string
 var kubeconfig string
 var labelSelector string
+var lifetime int
 var verbose bool
 var k8sClient *k8s.K8s
 
@@ -29,7 +30,7 @@ var rootCmd = &cobra.Command{
 			command = args[argsLenAtDash:]
 		}
 
-		console.Start(k8sClient, labelSelector, command)
+		console.Start(k8sClient, labelSelector, lifetime, command)
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
@@ -64,6 +65,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "", "config file (default $HOME/.config/kubeconsole)")
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
 	rootCmd.PersistentFlags().StringVarP(&labelSelector, "selector", "l", "process in (console, rails-shell)", "label selector, works the same as the -l flag for kubectl")
+	rootCmd.PersistentFlags().IntVar(&lifetime, "lifetime", 1, "lifetime in hours that the pod should be able to live after the heartbeat has stopped")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose")
 }
 
