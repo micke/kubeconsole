@@ -19,18 +19,19 @@ var lifetime int
 var verbose bool
 var k8sClient *k8s.K8s
 
+var options console.Options
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "kubeconsole [environment]",
 	Short: "kubeconsole is used to create a temporary pod based on a deployments specification",
 	Run: func(cmd *cobra.Command, args []string) {
 		k8sClient.SelectContext(args[0])
-		command := []string{}
 		if argsLenAtDash := cmd.ArgsLenAtDash(); argsLenAtDash > 0 {
-			command = args[argsLenAtDash:]
+			options.Command = args[argsLenAtDash:]
 		}
 
-		console.Start(k8sClient, labelSelector, lifetime, command)
+		console.Start(k8sClient, options)
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
@@ -64,9 +65,11 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "", "config file (default $HOME/.config/kubeconsole)")
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
-	rootCmd.PersistentFlags().StringVarP(&labelSelector, "selector", "l", "process in (console, rails-shell)", "label selector, works the same as the -l flag for kubectl")
-	rootCmd.PersistentFlags().IntVar(&lifetime, "lifetime", 1, "lifetime in hours that the pod should be able to live after the heartbeat has stopped")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose")
+	rootCmd.PersistentFlags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
+	rootCmd.PersistentFlags().IntVar(&options.Lifetime, "lifetime", 1, "Lifetime in hours that the pod should be able to live after the heartbeat has stopped")
+	rootCmd.PersistentFlags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
+	rootCmd.PersistentFlags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose")
 }
 
 func initConfig() {

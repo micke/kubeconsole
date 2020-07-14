@@ -25,16 +25,26 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubectl/pkg/cmd/attach"
 	"k8s.io/kubectl/pkg/cmd/exec"
+	generateversioned "k8s.io/kubectl/pkg/generate/versioned"
 	"k8s.io/kubectl/pkg/util/interrupt"
 )
+
+// Options defines how the console should be ran
+type Options struct {
+	LabelSelector string
+	Lifetime      int
+	Command       []string
+	Limits        string
+	Image         string
+}
 
 var defaultAttachTimeout = 30 * time.Second
 
 // Start the console
-func Start(k8s *k8s.K8s, labelSelector string, lifetime int, command []string) {
+func Start(k8s *k8s.K8s, options Options) {
 	deploymentsClient := k8s.Clientset.AppsV1().Deployments("")
 
-	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: labelSelector})
+	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: options.LabelSelector})
 	if err != nil {
 		panic(err)
 	}
@@ -74,19 +84,36 @@ func Start(k8s *k8s.K8s, labelSelector string, lifetime int, command []string) {
 	pod.Annotations["kubeconsole.creator.name"] = user.Name
 	pod.Annotations["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
-	pod.Annotations["kubeconsole.lifetime"] = strconv.Itoa(lifetime)
+	pod.Annotations["kubeconsole.lifetime"] = strconv.Itoa(options.Lifetime)
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
 	pod.Spec.Containers[0].TTY = true
 	pod.Spec.Containers[0].Stdin = true
 
 	// Set command if one was provided
-	if len(command) > 0 {
-		pod.Spec.Containers[0].Command = command
+	if len(options.Command) > 0 {
+		pod.Spec.Containers[0].Command = options.Command
 	}
 
-	// Set default generator name if none was one
+	// Set default GenerateName if it's not already set
 	if pod.GenerateName == "" {
 		pod.GenerateName = "kubeconsole-"
+	}
+
+	// Set limits and requests
+	if options.Limits != "" {
+		params := map[string]string{}
+		params["limits"] = options.Limits
+		params["requests"] = options.Limits
+		resourceRequirements, err := generateversioned.HandleResourceRequirementsV1(params)
+		if err != nil {
+			panic(err)
+		}
+		pod.Spec.Containers[0].Resources = resourceRequirements
+	}
+
+	// Set image if one was specified
+	if options.Image != "" {
+		pod.Spec.Containers[0].Image = options.Image
 	}
 
 	createdPod, err := podsClient.Create(context.TODO(), pod, metav1.CreateOptions{})
