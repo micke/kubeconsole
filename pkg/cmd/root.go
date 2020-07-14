@@ -25,6 +25,12 @@ var options console.Options
 var rootCmd = &cobra.Command{
 	Use:   "kubeconsole [environment]",
 	Short: "kubeconsole is used to create a temporary pod based on a deployments specification",
+	Example: `
+		# Select a deployment in the production environment
+		kubeconsole production
+		# Run a custom command instead of the command specified in the deployment
+		kubeconsole production -- /bin/bash
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		k8sClient.SelectContext(args[0])
 		if argsLenAtDash := cmd.ArgsLenAtDash(); argsLenAtDash > 0 {
