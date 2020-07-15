@@ -36,6 +36,7 @@ type Options struct {
 	Command       []string
 	Limits        string
 	Image         string
+	NoRm          bool
 }
 
 var defaultAttachTimeout = 30 * time.Second
@@ -120,7 +121,9 @@ func Start(k8s *k8s.K8s, options Options) {
 	if err != nil {
 		panic(err)
 	}
-	defer deletePod(createdPod, podsClient)
+	if !options.NoRm {
+		defer deletePod(createdPod, podsClient)
+	}
 	printPodStatus(createdPod)
 	scheduleHeartbeat(createdPod, podsClient)
 
