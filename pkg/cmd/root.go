@@ -14,8 +14,6 @@ import (
 
 var config string
 var kubeconfig string
-var labelSelector string
-var lifetime int
 var verbose bool
 var k8sClient *k8s.K8s
 
