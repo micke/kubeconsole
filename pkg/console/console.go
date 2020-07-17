@@ -133,19 +133,21 @@ func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string)
 	var deployments []appsv1.Deployment
 
 	if deploymentName != "" {
+		// If deploymentName is specified then we will filter for deployments matching it
 		for _, d := range allDeployments {
 			if strings.HasPrefix(d.Name, deploymentName) {
 				deployments = append(deployments, d)
 			}
 		}
 
-		switch len(deployments) {
-		case 1:
+		// If exactly one deployment matches deploymentName then that's the deployment we want to run
+		if len(deployments) == 1 {
 			return &deployments[0]
-		case 0:
-			deployments = allDeployments
 		}
-	} else {
+	}
+
+	// If no deployments matched deploymentName then we let the user pick among all of them
+	if len(deployments) == 0 {
 		deployments = allDeployments
 	}
 

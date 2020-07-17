@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/micke/kubeconsole/pkg/console"
 	"github.com/micke/kubeconsole/pkg/k8s"
@@ -41,12 +42,20 @@ kubeconsole production -- /bin/bash`,
 			return errors.New("requires a environment argument")
 		}
 
+		// If no context with the specified name is found
 		if k8sClient.Contexts[args[0]] == nil {
 			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], k8sClient.ContextNames())
 		}
 
-		if argLength > 1 {
+		// If there is a second argument that's not dashes then we assign it to DeploymentName
+		if argLength > 1 && cmd.ArgsLenAtDash() != 1 {
 			options.DeploymentName = args[1]
+		} else {
+			// Otherwise we set DeploymentName to the current path
+			path, err := os.Getwd()
+			if err == nil {
+				options.DeploymentName = filepath.Base(path)
+			}
 		}
 
 		return nil
