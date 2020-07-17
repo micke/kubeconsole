@@ -87,7 +87,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "", "config file (default $HOME/.config/kubeconsole)")
 	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
 	rootCmd.PersistentFlags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
-	rootCmd.PersistentFlags().IntVar(&options.Lifetime, "lifetime", 1, "Lifetime in hours that the pod should live after the heartbeat has stopped")
+	rootCmd.PersistentFlags().IntVar(&options.Timeout, "timeout", 15, "Time in minutes that the pod should live after the heartbeat has stopped")
 	rootCmd.PersistentFlags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
 	rootCmd.PersistentFlags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
 	rootCmd.PersistentFlags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")

@@ -34,7 +34,7 @@ import (
 // Options defines how the console should be ran
 type Options struct {
 	LabelSelector  string
-	Lifetime       int
+	Timeout        int
 	Command        []string
 	Limits         string
 	Image          string
@@ -64,7 +64,7 @@ func Start(k8s *k8s.K8s, options Options) {
 	pod.Annotations["kubeconsole.creator.name"] = user.Name
 	pod.Annotations["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
-	pod.Annotations["kubeconsole.lifetime"] = strconv.Itoa(options.Lifetime)
+	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(options.Timeout)
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
 	pod.Spec.Containers[0].TTY = true
 	pod.Spec.Containers[0].Stdin = true
