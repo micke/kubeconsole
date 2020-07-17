@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/user"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/AlecAivazis/survey/v2/terminal"
 	"github.com/micke/kubeconsole/pkg/k8s"
+	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,45 +33,22 @@ import (
 
 // Options defines how the console should be ran
 type Options struct {
-	LabelSelector string
-	Lifetime      int
-	Command       []string
-	Limits        string
-	Image         string
-	NoRm          bool
+	LabelSelector  string
+	Lifetime       int
+	Command        []string
+	Limits         string
+	Image          string
+	NoRm           bool
+	DeploymentName string
 }
 
 var defaultAttachTimeout = 30 * time.Second
 
 // Start the console
 func Start(k8s *k8s.K8s, options Options) {
-	deploymentsClient := k8s.Clientset.AppsV1().Deployments("")
+	deployments := k8s.Deployments(options.LabelSelector)
 
-	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: options.LabelSelector})
-	if err != nil {
-		panic(err)
-	}
-	deployments := list.Items
-
-	deploymentNames := make([]string, len(deployments))
-	for i, d := range deployments {
-		deploymentNames[i] = d.Name
-	}
-
-	selectedDeployment := 0
-	prompt := &survey.Select{
-		Message: "Choose a deployment:",
-		Options: deploymentNames,
-	}
-	err = survey.AskOne(prompt, &selectedDeployment)
-	if err == terminal.InterruptErr {
-		fmt.Println("Cancelled")
-		os.Exit(0)
-	} else if err != nil {
-		panic(err)
-	}
-
-	deployment := deployments[selectedDeployment]
+	deployment := selectDeployment(deployments, options.DeploymentName)
 
 	user, err := user.Current()
 	if err != nil {
@@ -148,6 +127,47 @@ func Start(k8s *k8s.K8s, options Options) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string) *appsv1.Deployment {
+	var deployments []appsv1.Deployment
+
+	if deploymentName != "" {
+		for _, d := range allDeployments {
+			if strings.HasPrefix(d.Name, deploymentName) {
+				deployments = append(deployments, d)
+			}
+		}
+
+		switch len(deployments) {
+		case 1:
+			return &deployments[0]
+		case 0:
+			deployments = allDeployments
+		}
+	} else {
+		deployments = allDeployments
+	}
+
+	deploymentNames := make([]string, len(deployments))
+	for i, d := range deployments {
+		deploymentNames[i] = d.Name
+	}
+
+	selectedDeployment := 0
+	prompt := &survey.Select{
+		Message: "Choose a deployment:",
+		Options: deploymentNames,
+	}
+	err := survey.AskOne(prompt, &selectedDeployment)
+	if err == terminal.InterruptErr {
+		fmt.Println("Cancelled")
+		os.Exit(0)
+	} else if err != nil {
+		panic(err)
+	}
+
+	return &deployments[selectedDeployment]
 }
 
 func deletePod(pod *apiv1.Pod, podsClient v1.PodInterface) {

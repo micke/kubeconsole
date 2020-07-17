@@ -36,7 +36,8 @@ kubeconsole production -- /bin/bash`,
 		console.Start(k8sClient, options)
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
+		argLength := len(args)
+		if argLength < 1 {
 			return errors.New("requires a environment argument")
 		}
 
@@ -44,13 +45,22 @@ kubeconsole production -- /bin/bash`,
 			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], k8sClient.ContextNames())
 		}
 
+		if argLength > 1 {
+			options.DeploymentName = args[1]
+		}
+
 		return nil
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
+		argLength := len(args)
+		if argLength == 0 {
+			return k8sClient.ContextNamesWithPrefix(toComplete), cobra.ShellCompDirectiveNoFileComp
+		} else if argLength == 1 {
+			k8sClient.SelectContext(args[0])
+			return k8sClient.DeploymentNamesWithPrefix(toComplete, options.LabelSelector), cobra.ShellCompDirectiveNoFileComp
+		} else {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return k8sClient.ContextNamesWithPrefix(toComplete), cobra.ShellCompDirectiveNoFileComp
 	},
 }
 
