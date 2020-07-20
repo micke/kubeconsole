@@ -60,11 +60,19 @@ func Start(k8s *k8s.K8s, options Options) {
 		Spec:       deployment.Spec.Template.Spec,
 		ObjectMeta: deployment.Spec.Template.ObjectMeta,
 	}
+
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
 	pod.Labels["kubeconsole.garbagecollect"] = "true"
 	pod.Annotations["kubeconsole.creator.name"] = user.Name
 	pod.Annotations["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
 	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(options.Timeout)
+
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
 	pod.Spec.Containers[0].TTY = true
 	pod.Spec.Containers[0].Stdin = true
