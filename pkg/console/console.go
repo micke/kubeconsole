@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -115,7 +116,8 @@ func Start(k8s *k8s.K8s, options Options) {
 	if !options.NoRm {
 		defer deletePod(createdPod, podsClient)
 	}
-	printPodStatus(createdPod)
+	fmt.Printf("Created pod %s/%s\n", createdPod.Namespace, createdPod.Name)
+	go watchPodEvents(createdPod, k8s.Clientset)
 	scheduleHeartbeat(createdPod, podsClient)
 
 	attachOpts := &attach.AttachOptions{
@@ -187,9 +189,9 @@ func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string)
 func deletePod(pod *apiv1.Pod, podsClient v1.PodInterface) {
 	err := podsClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
 	if err == nil {
-		fmt.Printf("\nDeleted %s\n", pod.Name)
+		fmt.Printf("\nDeleted pod %s/%s\n", pod.Namespace, pod.Name)
 	} else {
-		fmt.Printf("\nFailed to delete %s\n", pod.Name)
+		fmt.Printf("Failed to delete pod %s/%s: %s\n", pod.Namespace, pod.Name, err)
 	}
 }
 
@@ -259,7 +261,7 @@ func handleAttachPod(podsClient v1.PodInterface, pod *apiv1.Pod, attachOpts *att
 	attachOpts.PodName = pod.Name
 	attachOpts.Namespace = pod.Namespace
 
-	fmt.Print("\nAttaching...\n")
+	fmt.Print("Attaching...\n")
 
 	if err := attachOpts.Run(); err != nil {
 		fmt.Fprintf(attachOpts.ErrOut, "Error attaching, falling back to logs: %v\n", err)
@@ -281,7 +283,6 @@ func podRunningAndReady(event watch.Event) (bool, error) {
 	}
 	switch t := event.Object.(type) {
 	case *apiv1.Pod:
-		printPodStatus(t)
 		switch t.Status.Phase {
 		case apiv1.PodFailed, apiv1.PodSucceeded:
 			return false, ErrPodCompleted
@@ -301,22 +302,22 @@ func podRunningAndReady(event watch.Event) (bool, error) {
 	return false, nil
 }
 
-func printPodStatus(pod *apiv1.Pod) {
-	scheduled := false
-	ready := false
-
-	conditions := pod.Status.Conditions
-	if conditions != nil {
-		for _, c := range conditions {
-			if c.Type == apiv1.PodScheduled && c.Status == apiv1.ConditionTrue {
-				scheduled = true
-			} else if c.Type == apiv1.PodReady && c.Status == apiv1.ConditionTrue {
-				ready = true
-			}
-		}
-	}
-
-	fmt.Printf("\rCreated pod %s. Scheduled: %t, Ready: %t  ", pod.Name, scheduled, ready)
+func watchPodEvents(pod *apiv1.Pod, clientset *kubernetes.Clientset) {
+	fieldSelector := fields.OneTermEqualSelector("involvedObject.uid", string(pod.UID))
+	watchlist := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "events", pod.Namespace, fieldSelector)
+	_, controller := cache.NewInformer(
+		watchlist,
+		&apiv1.Event{},
+		time.Second*0,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				event := obj.(*apiv1.Event)
+				fmt.Printf("%s\n", event.Message)
+			},
+		},
+	)
+	stop := make(chan struct{})
+	controller.Run(stop)
 }
 
 func heartbeat(pod *apiv1.Pod, podsClient v1.PodInterface) error {
