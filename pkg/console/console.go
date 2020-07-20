@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -14,7 +15,7 @@ import (
 	"github.com/micke/kubeconsole/pkg/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,7 +43,10 @@ type Options struct {
 	DeploymentName string
 }
 
-var defaultAttachTimeout = 30 * time.Second
+var (
+	defaultAttachTimeout = 30 * time.Second
+	errInterrupted       = errors.New("interrupted")
+)
 
 // Start the console
 func Start(k8s *k8s.K8s, options Options) {
@@ -132,7 +136,7 @@ func Start(k8s *k8s.K8s, options Options) {
 	}
 
 	err = handleAttachPod(podsClient, createdPod, attachOpts)
-	if err != nil {
+	if err != nil && err != errInterrupted {
 		panic(err)
 	}
 }
@@ -183,9 +187,9 @@ func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string)
 func deletePod(pod *apiv1.Pod, podsClient v1.PodInterface) {
 	err := podsClient.Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
 	if err == nil {
-		fmt.Printf("Deleted %s\n", pod.Name)
+		fmt.Printf("\nDeleted %s\n", pod.Name)
 	} else {
-		fmt.Printf("Failed to delete %s\n", pod.Name)
+		fmt.Printf("\nFailed to delete %s\n", pod.Name)
 	}
 }
 
@@ -203,7 +207,7 @@ func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watcht
 			// We need to make sure we see the object in the cache before we start waiting for events
 			// or we would be waiting for the timeout if such object didn't exist.
 			// (e.g. it was deleted before we started informers so they wouldn't even see the delete event)
-			return true, errors.NewNotFound(apiv1.Resource("pods"), pod.Name)
+			return true, apierrors.NewNotFound(apiv1.Resource("pods"), pod.Name)
 		}
 
 		return false, nil
@@ -221,8 +225,9 @@ func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watcht
 		},
 	}
 
-	intr := interrupt.New(nil, cancel)
+	var interrupted bool
 	var result *apiv1.Pod
+	intr := interrupt.New(func(s os.Signal) { interrupted = true }, cancel)
 	err := intr.Run(func() error {
 		ev, err := watchtools.UntilWithSync(ctx, lw, &apiv1.Pod{}, preconditionFunc, func(ev watch.Event) (bool, error) {
 			return exitCondition(ev)
@@ -232,6 +237,10 @@ func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watcht
 		}
 		return err
 	})
+
+	if interrupted {
+		return result, errInterrupted
+	}
 
 	return result, err
 }
@@ -268,7 +277,7 @@ var ErrPodCompleted = fmt.Errorf("pod ran to completion")
 func podRunningAndReady(event watch.Event) (bool, error) {
 	switch event.Type {
 	case watch.Deleted:
-		return false, errors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
+		return false, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
 	}
 	switch t := event.Object.(type) {
 	case *apiv1.Pod:
