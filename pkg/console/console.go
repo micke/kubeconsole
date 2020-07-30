@@ -73,8 +73,8 @@ func Start(k8s *k8s.K8s, options Options) {
 		pod.Annotations = map[string]string{}
 	}
 	pod.Labels["kubeconsole.garbagecollect"] = "true"
+	pod.Labels["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.creator.name"] = user.Name
-	pod.Annotations["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
 	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(options.Timeout)
 
@@ -109,16 +109,23 @@ func Start(k8s *k8s.K8s, options Options) {
 		pod.Spec.Containers[0].Image = options.Image
 	}
 
-	createdPod, err := podsClient.Create(context.TODO(), pod, metav1.CreateOptions{})
-	if err != nil {
-		panic(err)
+	// Find existing pod if one exists
+	attachablePod := findRunningPod(pod, podsClient)
+
+	// If no running pod is found we will create one
+	if attachablePod == nil {
+		attachablePod, err = podsClient.Create(context.TODO(), pod, metav1.CreateOptions{})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("Created pod %s/%s\n", attachablePod.Namespace, attachablePod.Name)
 	}
+
 	if !options.NoRm {
-		defer deletePod(createdPod, podsClient)
+		defer deletePod(attachablePod, podsClient)
 	}
-	fmt.Printf("Created pod %s/%s\n", createdPod.Namespace, createdPod.Name)
-	go watchPodEvents(createdPod, k8s.Clientset)
-	scheduleHeartbeat(createdPod, podsClient)
+	go watchPodEvents(attachablePod, k8s.Clientset)
+	scheduleHeartbeat(attachablePod, podsClient)
 
 	attachOpts := &attach.AttachOptions{
 		StreamOptions: exec.StreamOptions{
@@ -137,7 +144,7 @@ func Start(k8s *k8s.K8s, options Options) {
 		AttachFunc:    attach.DefaultAttachFunc,
 	}
 
-	err = handleAttachPod(podsClient, createdPod, attachOpts)
+	err = handleAttachPod(podsClient, attachablePod, attachOpts)
 	if err != nil && err != errInterrupted {
 		panic(err)
 	}
@@ -245,6 +252,49 @@ func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watcht
 	}
 
 	return result, err
+}
+
+func findRunningPod(pod *apiv1.Pod, podsClient v1.PodInterface) *apiv1.Pod {
+	pods, err := podsClient.List(
+		context.TODO(),
+		metav1.ListOptions{LabelSelector: fields.SelectorFromSet(pod.Labels).String()},
+	)
+
+	if err != nil {
+		fmt.Println("Error finding already running consoles. Defaulting to creating new one")
+		return nil
+	}
+
+	if len(pods.Items) == 0 {
+		return nil
+	}
+
+	selectedPod := 0
+	options := make([]string, len(pods.Items)+1)
+	options[0] = "Create a new console pod"
+
+	for i, pod := range pods.Items {
+		options[i+1] = fmt.Sprintf("%s: Creeated %s", pod.Spec.Containers[0].Command, pod.CreationTimestamp)
+	}
+
+	prompt := &survey.Select{
+		Message: "Existing console pod found, would you like to create a new one or attach to an existing one?",
+		Options: options,
+	}
+	err = survey.AskOne(prompt, &selectedPod)
+
+	if err == terminal.InterruptErr {
+		fmt.Println("Cancelled")
+		os.Exit(0)
+	} else if err != nil {
+		panic(err)
+	}
+
+	if selectedPod == 0 {
+		return nil
+	}
+
+	return &pods.Items[selectedPod-1]
 }
 
 func handleAttachPod(podsClient v1.PodInterface, pod *apiv1.Pod, attachOpts *attach.AttachOptions) error {
