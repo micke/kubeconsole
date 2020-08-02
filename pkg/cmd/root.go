@@ -13,12 +13,17 @@ import (
 	"github.com/spf13/viper"
 )
 
-var config string
-var kubeconfig string
-var verbose bool
-var k8sClient *k8s.K8s
-
-var options console.Options
+var (
+	// Config specifies the path to the kubeconsole config file
+	Config string
+	// Kubeconfig specifies the path to the kubectl config file
+	Kubeconfig string
+	// Verbose specifies if verbose is enabled or not
+	Verbose bool
+	// K8sClient is a instance of K8s that holds common kubernetes objects
+	K8sClient *k8s.K8s
+	options   console.Options
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -29,12 +34,12 @@ kubeconsole production
 # Run a custom command instead of the command specified in the deployment
 kubeconsole production -- /bin/bash`,
 	Run: func(cmd *cobra.Command, args []string) {
-		k8sClient.SelectContext(args[0])
+		K8sClient.SelectContext(args[0])
 		if argsLenAtDash := cmd.ArgsLenAtDash(); argsLenAtDash > 0 {
 			options.Command = args[argsLenAtDash:]
 		}
 
-		console.Start(k8sClient, options)
+		console.Start(K8sClient, options)
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
 		argLength := len(args)
@@ -43,8 +48,8 @@ kubeconsole production -- /bin/bash`,
 		}
 
 		// If no context with the specified name is found
-		if k8sClient.Contexts[args[0]] == nil {
-			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], k8sClient.ContextNames())
+		if K8sClient.Contexts[args[0]] == nil {
+			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], K8sClient.ContextNames())
 		}
 
 		// If there is a second argument that's not dashes then we assign it to DeploymentName
@@ -61,13 +66,15 @@ kubeconsole production -- /bin/bash`,
 		return nil
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		argLength := len(args)
-		if argLength == 0 {
-			return k8sClient.ContextNamesWithPrefix(toComplete), cobra.ShellCompDirectiveNoFileComp
-		} else if argLength == 1 {
-			k8sClient.SelectContext(args[0])
-			return k8sClient.DeploymentNamesWithPrefix(toComplete, options.LabelSelector), cobra.ShellCompDirectiveNoFileComp
-		} else {
+		switch len(args) {
+		// Completing context names
+		case 0:
+			return K8sClient.ContextNamesWithPrefix(toComplete), cobra.ShellCompDirectiveNoFileComp
+		// Completing deployment names
+		case 1:
+			K8sClient.SelectContext(args[0])
+			return K8sClient.DeploymentNamesWithPrefix(toComplete, options.LabelSelector), cobra.ShellCompDirectiveNoFileComp
+		default:
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 	},
@@ -84,14 +91,15 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "", "config file (default $HOME/.config/kubeconsole)")
-	rootCmd.PersistentFlags().StringVar(&kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
-	rootCmd.PersistentFlags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
-	rootCmd.PersistentFlags().IntVar(&options.Timeout, "timeout", 15, "Time in minutes that the pod should live after the heartbeat has stopped")
-	rootCmd.PersistentFlags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
-	rootCmd.PersistentFlags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
-	rootCmd.PersistentFlags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose")
+	rootCmd.PersistentFlags().StringVarP(&Config, "config", "c", "", "config file (default $HOME/.config/kubeconsole)")
+	rootCmd.PersistentFlags().StringVar(&Kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
+	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Enable verbose")
+
+	rootCmd.Flags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
+	rootCmd.Flags().IntVar(&options.Timeout, "timeout", 15, "Time in minutes that the pod should live after the heartbeat has stopped")
+	rootCmd.Flags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
+	rootCmd.Flags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
+	rootCmd.Flags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")
 }
 
 func initConfig() {
@@ -101,9 +109,9 @@ func initConfig() {
 		os.Exit(1)
 	}
 
-	if config != "" {
+	if Config != "" {
 		// Use config file from the flag.
-		viper.SetConfigFile(config)
+		viper.SetConfigFile(Config)
 	} else {
 		// Search config in home directory with name ".config/kubeconsole" (without extension).
 		viper.AddConfigPath(home + "/.config")
@@ -111,18 +119,18 @@ func initConfig() {
 		viper.SetConfigType("yaml")
 	}
 
-	if kubeconfig == "" {
-		kubeconfig = home + "/.kube/config"
+	if Kubeconfig == "" {
+		Kubeconfig = home + "/.kube/config"
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		if verbose {
+		if Verbose {
 			fmt.Println("Using config file:", viper.ConfigFileUsed())
 		}
 	}
 
-	k8sClient = k8s.NewK8s(kubeconfig)
+	K8sClient = k8s.NewK8s(Kubeconfig)
 }
