@@ -53,6 +53,11 @@ var (
 func Start(k8s *k8s.K8s, options Options) {
 	deployments := k8s.Deployments(options.LabelSelector)
 
+	if len(deployments) == 0 {
+		fmt.Fprintf(os.Stderr, "No mathing deployments found. label-selector is currently: %s\n", options.LabelSelector)
+		os.Exit(1)
+	}
+
 	deployment := selectDeployment(deployments, options.DeploymentName)
 
 	user, err := user.Current()
