@@ -4,7 +4,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/micke/kubeconsole/pkg/console"
 	"github.com/spf13/cobra"
+)
+
+var (
+	allEnvironments bool
+	everyone        bool
 )
 
 var lsCmd = &cobra.Command{
@@ -17,17 +23,20 @@ kubeconsole ls --all-environments
 # List everyones console pods in all environments
 kubeconsole ls --everyone --all-environment`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("ls called")
+		K8sClient.SelectContext(args[0])
+
+		console.List(K8sClient, allEnvironments, everyone, MachineID)
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
-		argLength := len(args)
-		if argLength < 1 {
-			return errors.New("requires a environment argument")
-		}
+		if !allEnvironments {
+			if len(args) < 1 {
+				return errors.New("requires a environment argument")
+			}
 
-		// If no context with the specified name is found
-		if K8sClient.Contexts[args[0]] == nil {
-			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], K8sClient.ContextNames())
+			// If no context with the specified name is found
+			if K8sClient.Contexts[args[0]] == nil {
+				return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], K8sClient.ContextNames())
+			}
 		}
 
 		return nil
@@ -46,13 +55,6 @@ kubeconsole ls --everyone --all-environment`,
 func init() {
 	rootCmd.AddCommand(lsCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// lsCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// lsCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	lsCmd.Flags().BoolVarP(&allEnvironments, "all-environments", "a", false, "Find console pods in all environments")
+	lsCmd.Flags().BoolVarP(&everyone, "everyone", "e", false, "Find everyone's console pods, not just your own console pods")
 }

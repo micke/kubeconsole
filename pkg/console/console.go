@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/user"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/AlecAivazis/survey/v2"
@@ -36,12 +38,13 @@ import (
 // Options defines how the console should be ran
 type Options struct {
 	LabelSelector  string
-	Timeout        int
+	Timeout        time.Duration
 	Command        []string
 	Limits         string
 	Image          string
 	NoRm           bool
 	DeploymentName string
+	MachineID      string
 }
 
 var (
@@ -78,10 +81,11 @@ func Start(k8s *k8s.K8s, options Options) {
 		pod.Annotations = map[string]string{}
 	}
 	pod.Labels["kubeconsole.garbagecollect"] = "true"
-	pod.Labels["kubeconsole.creator.username"] = user.Username
+	pod.Labels["kubeconsole.creator.machineid"] = options.MachineID
+	pod.Annotations["kubeconsole.creator.username"] = user.Username
 	pod.Annotations["kubeconsole.creator.name"] = user.Name
 	pod.Annotations["kubeconsole.heartbeat"] = time.Now().Format(time.RFC3339)
-	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(options.Timeout)
+	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(int(options.Timeout.Minutes()))
 
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
 	pod.Spec.Containers[0].TTY = true
@@ -153,6 +157,70 @@ func Start(k8s *k8s.K8s, options Options) {
 	if err != nil && err != errInterrupted {
 		panic(err)
 	}
+}
+
+// List lists all running console pods
+func List(k8s *k8s.K8s, allEnvironments, everyone bool, machineID string) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+
+	selectors := map[string]string{
+		"kubeconsole.garbagecollect": "true",
+	}
+
+	if !everyone {
+		selectors["kubeconsole.creator.machineid"] = machineID
+	}
+
+	podsClient := k8s.Clientset.CoreV1().Pods("")
+	pods, err := podsClient.List(
+		context.TODO(),
+		metav1.ListOptions{LabelSelector: fields.SelectorFromSet(selectors).String()},
+	)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching pods: %s", err)
+	}
+
+	fmt.Fprintln(w, "NAME\tNAMESPACE\tCREATOR\tAGE\tIMAGE\tLABELS")
+	for _, p := range pods.Items {
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%v\t%v\n",
+			p.Name,
+			p.Namespace,
+			p.Annotations["kubeconsole.creator.name"],
+			formatAge(p.CreationTimestamp.Time),
+			p.Spec.Containers[0].Image,
+			formatLabels(p.Labels),
+		)
+	}
+	w.Flush()
+}
+
+func formatAge(datetime time.Time) string {
+	duration := time.Now().Sub(datetime)
+
+	if duration.Hours() > 24 {
+		return fmt.Sprintf("%.0fd", math.RoundToEven(duration.Hours()/24))
+	} else if duration.Minutes() > 60 {
+		return fmt.Sprintf("%.0fh", math.RoundToEven(duration.Hours()))
+	} else {
+		return fmt.Sprintf("%.0fm", math.RoundToEven(duration.Minutes()))
+	}
+}
+
+func formatLabels(labels map[string]string) string {
+	var formattedLabels []string
+
+	for name, value := range labels {
+		if strings.HasPrefix(name, "kubeconsole.") {
+			continue
+		}
+
+		formattedLabels = append(formattedLabels, fmt.Sprintf("%s=%s", name, value))
+	}
+
+	return strings.Join(formattedLabels, ", ")
 }
 
 func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string) *appsv1.Deployment {

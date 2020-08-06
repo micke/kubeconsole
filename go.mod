@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.0.8
+	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/mitchellh/mapstructure v1.3.2 // indirect
 	github.com/pelletier/go-toml v1.8.0 // indirect

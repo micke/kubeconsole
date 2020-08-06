@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/denisbrodbeck/machineid"
 	"github.com/micke/kubeconsole/pkg/console"
 	"github.com/micke/kubeconsole/pkg/k8s"
 	"github.com/spf13/cobra"
@@ -22,6 +24,8 @@ var (
 	Verbose bool
 	// K8sClient is a instance of K8s that holds common kubernetes objects
 	K8sClient *k8s.K8s
+	// MachineID is used to match console pods to this machine
+	MachineID string
 	options   console.Options
 )
 
@@ -35,9 +39,12 @@ kubeconsole production
 kubeconsole production -- /bin/bash`,
 	Run: func(cmd *cobra.Command, args []string) {
 		K8sClient.SelectContext(args[0])
+
 		if argsLenAtDash := cmd.ArgsLenAtDash(); argsLenAtDash > 0 {
 			options.Command = args[argsLenAtDash:]
 		}
+
+		options.MachineID = MachineID
 
 		console.Start(K8sClient, options)
 	},
@@ -96,10 +103,14 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Enable verbose")
 
 	rootCmd.Flags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
-	rootCmd.Flags().IntVar(&options.Timeout, "timeout", 15, "Time in minutes that the pod should live after the heartbeat has stopped")
+	rootCmd.Flags().DurationVar(&options.Timeout, "timeout", 0, "Time that the pod should live after the heartbeat has stopped. For example 15m, 24h (default 15m)")
 	rootCmd.Flags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
 	rootCmd.Flags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
 	rootCmd.Flags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")
+
+	viper.BindPFlag("kubeconfig", rootCmd.PersistentFlags().Lookup("kubeconfig"))
+	viper.BindPFlag("selector", rootCmd.PersistentFlags().Lookup("selector"))
+	viper.BindPFlag("timeout", rootCmd.PersistentFlags().Lookup("timeout"))
 }
 
 func initConfig() {
@@ -123,6 +134,10 @@ func initConfig() {
 		Kubeconfig = home + "/.kube/config"
 	}
 
+	if options.Timeout < 0 {
+		options.Timeout = 15 * time.Minute
+	}
+
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.
@@ -130,6 +145,11 @@ func initConfig() {
 		if Verbose {
 			fmt.Println("Using config file:", viper.ConfigFileUsed())
 		}
+	}
+
+	MachineID, err = machineid.ID()
+	if err != nil {
+		panic(err)
 	}
 
 	K8sClient = k8s.NewK8s(Kubeconfig)
