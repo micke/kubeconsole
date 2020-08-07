@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -172,33 +174,50 @@ func List(k8s *k8s.K8s, environments []string, everyone bool, machineID string) 
 		selectors["kubeconsole.creator.machineid"] = machineID
 	}
 
+	environmentWriters := make(map[string]*bufio.Writer, 0)
+	var wg sync.WaitGroup
+
 	for _, environment := range environments {
-		k8s.SelectContext(environment)
+		wg.Add(1)
+		environmentWriters[environment] = bufio.NewWriter(w)
 
-		podsClient := k8s.Clientset.CoreV1().Pods("")
-		pods, err := podsClient.List(
-			context.TODO(),
-			metav1.ListOptions{LabelSelector: fields.SelectorFromSet(selectors).String()},
-		)
+		go func(environment string) {
+			k8s.SelectContext(environment)
 
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fetching pods for %s: %s", environment, err)
-		}
-
-		for _, p := range pods.Items {
-			fmt.Fprintf(
-				w,
-				"%s\t%s\t%s\t%s\t%s\t%v\t%v\n",
-				environment,
-				p.Name,
-				p.Namespace,
-				p.Annotations["kubeconsole.creator.name"],
-				formatAge(p.CreationTimestamp.Time),
-				p.Spec.Containers[0].Image,
-				formatLabels(p.Labels),
+			podsClient := k8s.Clientset.CoreV1().Pods("")
+			pods, err := podsClient.List(
+				context.TODO(),
+				metav1.ListOptions{LabelSelector: fields.SelectorFromSet(selectors).String()},
 			)
-		}
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error fetching pods for %s: %s\n", environment, err)
+			}
+
+			for _, p := range pods.Items {
+				fmt.Fprintf(
+					environmentWriters[environment],
+					"%s\t%s\t%s\t%s\t%s\t%v\t%v\n",
+					environment,
+					p.Name,
+					p.Namespace,
+					p.Annotations["kubeconsole.creator.name"],
+					formatAge(p.CreationTimestamp.Time),
+					p.Spec.Containers[0].Image,
+					formatLabels(p.Labels),
+				)
+			}
+
+			wg.Done()
+		}(environment)
 	}
+
+	wg.Wait()
+
+	for _, writer := range environmentWriters {
+		writer.Flush()
+	}
+
 	w.Flush()
 }
 

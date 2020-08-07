@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -43,6 +44,8 @@ func (k8s *K8s) ContextNames() []string {
 	for key := range k8s.Contexts {
 		contextNames = append(contextNames, key)
 	}
+
+	sort.Strings(contextNames)
 
 	return contextNames
 }
