@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
@@ -56,7 +57,7 @@ kubeconsole production -- /bin/bash`,
 
 		// If no context with the specified name is found
 		if K8sClient.Contexts[args[0]] == nil {
-			return fmt.Errorf("invalid environment specified: %s, available environments are %v", args[0], K8sClient.ContextNames())
+			return fmt.Errorf("invalid environment specified: %s, available environments are: %v", args[0], strings.Join(K8sClient.ContextNames(), ", "))
 		}
 
 		// If there is a second argument that's not dashes then we assign it to DeploymentName

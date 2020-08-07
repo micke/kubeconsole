@@ -160,8 +160,9 @@ func Start(k8s *k8s.K8s, options Options) {
 }
 
 // List lists all running console pods
-func List(k8s *k8s.K8s, allEnvironments, everyone bool, machineID string) {
+func List(k8s *k8s.K8s, environments []string, everyone bool, machineID string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ENVIRONMENT\tNAME\tNAMESPACE\tCREATOR\tAGE\tIMAGE\tLABELS")
 
 	selectors := map[string]string{
 		"kubeconsole.garbagecollect": "true",
@@ -171,28 +172,32 @@ func List(k8s *k8s.K8s, allEnvironments, everyone bool, machineID string) {
 		selectors["kubeconsole.creator.machineid"] = machineID
 	}
 
-	podsClient := k8s.Clientset.CoreV1().Pods("")
-	pods, err := podsClient.List(
-		context.TODO(),
-		metav1.ListOptions{LabelSelector: fields.SelectorFromSet(selectors).String()},
-	)
+	for _, environment := range environments {
+		k8s.SelectContext(environment)
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching pods: %s", err)
-	}
-
-	fmt.Fprintln(w, "NAME\tNAMESPACE\tCREATOR\tAGE\tIMAGE\tLABELS")
-	for _, p := range pods.Items {
-		fmt.Fprintf(
-			w,
-			"%s\t%s\t%s\t%s\t%v\t%v\n",
-			p.Name,
-			p.Namespace,
-			p.Annotations["kubeconsole.creator.name"],
-			formatAge(p.CreationTimestamp.Time),
-			p.Spec.Containers[0].Image,
-			formatLabels(p.Labels),
+		podsClient := k8s.Clientset.CoreV1().Pods("")
+		pods, err := podsClient.List(
+			context.TODO(),
+			metav1.ListOptions{LabelSelector: fields.SelectorFromSet(selectors).String()},
 		)
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching pods for %s: %s", environment, err)
+		}
+
+		for _, p := range pods.Items {
+			fmt.Fprintf(
+				w,
+				"%s\t%s\t%s\t%s\t%s\t%v\t%v\n",
+				environment,
+				p.Name,
+				p.Namespace,
+				p.Annotations["kubeconsole.creator.name"],
+				formatAge(p.CreationTimestamp.Time),
+				p.Spec.Containers[0].Image,
+				formatLabels(p.Labels),
+			)
+		}
 	}
 	w.Flush()
 }
