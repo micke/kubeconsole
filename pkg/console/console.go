@@ -244,7 +244,7 @@ func formatLabels(labels map[string]string) string {
 		formattedLabels = append(formattedLabels, fmt.Sprintf("%s=%s", name, value))
 	}
 
-	return strings.Join(formattedLabels, ", ")
+	return strings.Join(formattedLabels, " ")
 }
 
 func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string) *appsv1.Deployment {
