@@ -1,1 +1,1 @@
-![Logo](https://raw.githubusercontent.com/micke/kubeconsole/master/assets/logo.png)
+![Logo](https://raw.githubusercontent.com/micke/kubeconsole/master/assets/logosmall.png)
