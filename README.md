@@ -39,3 +39,37 @@ Comming soon
 
 kubeconsole currently expects your environments to be separated into different
 kubectl contexts, so to run a console in your production cluster you execute `kubeconosole production`.
+
+## More info see `kubeconsole -h`
+
+```
+kubeconsole is used to create a temporary pod based on a deployments specification
+
+Usage:
+  kubeconsole [environment] [flags]
+  kubeconsole [command]
+
+Examples:
+# Select a deployment in the production environment
+kubeconsole production
+# Run a custom command instead of the command specified in the deployment
+kubeconsole production -- /bin/bash
+
+Available Commands:
+  completion  Generate completion script
+  help        Help about any command
+  ls          Lists all the currently running console pods
+
+Flags:
+  -c, --config string       config file (default $HOME/.config/kubeconsole)
+  -h, --help                help for kubeconsole
+      --image string        The image for the container to run. Replaces the image specified in the deployment
+      --kubeconfig string   kubeconfig file (default $HOME/.kube/config)
+      --limits string       The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests
+      --no-rm               Do not remove pod when detaching
+  -l, --selector string     Label selector used to filter the deployments, works the same as the -l flag for kubectl (default "process in (console, rails-shell)")
+      --timeout duration    Time that the pod should live after the heartbeat has stopped. For example 15m, 24h (default 15m0s)
+  -v, --verbose             Enable verbose
+
+Use "kubeconsole [command] --help" for more information about a command.
+```
