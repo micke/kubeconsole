@@ -354,7 +354,10 @@ func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watcht
 func findRunningPod(pod *apiv1.Pod, podsClient v1.PodInterface) *apiv1.Pod {
 	pods, err := podsClient.List(
 		context.TODO(),
-		metav1.ListOptions{LabelSelector: fields.SelectorFromSet(pod.Labels).String()},
+		metav1.ListOptions{
+			LabelSelector: fields.SelectorFromSet(pod.Labels).String(),
+			FieldSelector: "status.phase=Running",
+		},
 	)
 
 	if err != nil {
