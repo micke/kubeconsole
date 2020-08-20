@@ -1,0 +1,22 @@
+name: kubeconsole
+version: '1.0.0'
+summary: Commandline utility to start to use REPL or shell in a Kubernetes cluster
+confinement: classic
+description: |
+  Commandline utility to start to use REPL or shell in a Kubernetes cluster
+
+base: core20
+
+parts:
+  kubeconsole:
+    plugin: go
+    source: https://github.com/micke/kubeconsole
+    source-type: git
+    build-packages:
+      - gcc
+      - pkg-config
+      - gcc-multilib
+
+apps:
+  kubeconsole:
+    command: bin/kubeconsole
