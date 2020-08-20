@@ -15,5 +15,6 @@
 # vendor/
 
 build/*
+*.snap
 
 kubeconsole
