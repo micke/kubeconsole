@@ -103,7 +103,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&Kubeconfig, "kubeconfig", "", "kubeconfig file (default $HOME/.kube/config)")
 	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "Enable verbose")
 
-	rootCmd.Flags().StringVarP(&options.LabelSelector, "selector", "l", "process in (console, rails-shell)", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
+	rootCmd.Flags().StringVarP(&options.LabelSelector, "selector", "l", "process=console", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
 	rootCmd.Flags().DurationVar(&options.Timeout, "timeout", 15*time.Minute, "Time that the pod should live after the heartbeat has stopped. For example 15m, 24h")
 	rootCmd.Flags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
 	rootCmd.Flags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
