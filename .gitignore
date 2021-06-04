@@ -18,3 +18,4 @@ build/*
 *.snap
 
 kubeconsole
+completions/
