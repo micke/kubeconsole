@@ -1,0 +1,47 @@
+before:
+  hooks:
+    - go mod tidy
+    - ./generate_completions.sh
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - 386
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+archives:
+  - files:
+      - README.md
+      - LICENSE
+      - completions/*
+
+brews:
+  - tap:
+      owner: micke
+      name: homebrew-kubeconsole
+    homepage: https://github.com/micke/kubeconsole
+    description: Utility to create temporary REPL pods from deployments
+    license: MIT
+    test: system "#{bin}/kubeconsole", "--help"
+    post_install: |
+      bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
+      zsh_completion.install "completions/{{ .ProjectName }}.zsh" => "_{{ .ProjectName }}"
+      fish_completion.install "completions/{{ .ProjectName }}.fish" => "_{{ .ProjectName }}"

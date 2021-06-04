@@ -19,3 +19,4 @@ build/*
 
 kubeconsole
 completions/
+dist/
