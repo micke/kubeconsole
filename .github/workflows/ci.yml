@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: '*'
+    tags: v*
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_test:
+    name: Build and test for ${{ matrix.os.target }}-${{ matrix.arch }} on ${{ matrix.os.host }}
+    runs-on: ${{ matrix.os.host }}
+    strategy:
+      matrix:
+        arch:
+          - amd64
+          - arm64
+
+        os:
+          - target: darwin
+            host: macOS-latest
+          - target: linux
+            host: ubuntu-latest
+
+        include:
+          - arch: 386
+            os:
+              target: linux
+              host: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Build
+        run: go build
+        env:
+          GOOS: ${{ matrix.os.target }}
+          GOARCH: ${{ matrix.arch }}
+
+      - name: Test
+        if: matrix.arch == 'amd64'
+        run: ./kubeconsole --help
+
+  release:
+    name: Publish Release
+    needs: build_and_test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --rm-dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
