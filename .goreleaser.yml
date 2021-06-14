@@ -41,7 +41,9 @@ brews:
     description: Utility to create temporary REPL pods from deployments
     license: MIT
     test: system "#{bin}/kubeconsole", "--help"
-    post_install: |
+    install: |
+      bin.install "{{ .ProjectName }}"
+
       bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
       zsh_completion.install "completions/{{ .ProjectName }}.zsh" => "_{{ .ProjectName }}"
       fish_completion.install "completions/{{ .ProjectName }}.fish" => "_{{ .ProjectName }}"
