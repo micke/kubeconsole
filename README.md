@@ -32,7 +32,7 @@ companion controller in the cluster).
 
 ## Linux
 
-Comming soon
+[Download the latest pre-built binary](https://github.com/micke/kubeconsole/releases) for your architecture and place it in your `PATH`.
 
 
 # How to use
