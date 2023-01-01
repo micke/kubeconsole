@@ -108,6 +108,7 @@ func init() {
 	rootCmd.Flags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
 	rootCmd.Flags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
 	rootCmd.Flags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")
+	rootCmd.Flags().BoolVarP(&options.RunAsRoot, "root", "", false, "Run pod as root")
 
 	viper.BindPFlag("kubeconfig", rootCmd.PersistentFlags().Lookup("kubeconfig"))
 	viper.BindPFlag("selector", rootCmd.PersistentFlags().Lookup("selector"))

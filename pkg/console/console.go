@@ -47,6 +47,7 @@ type Options struct {
 	NoRm           bool
 	DeploymentName string
 	MachineID      string
+	RunAsRoot      bool
 }
 
 var (
@@ -113,6 +114,14 @@ func Start(k8s *k8s.K8s, options Options) {
 			panic(err)
 		}
 		pod.Spec.Containers[0].Resources = resourceRequirements
+	}
+
+	// Set security context to run as root
+	if options.RunAsRoot {
+		runAsNonRoot  := false
+		runAsUser := int64(0)
+		pod.Spec.SecurityContext.RunAsNonRoot = &runAsNonRoot
+		pod.Spec.SecurityContext.RunAsUser = &runAsUser
 	}
 
 	// Set image if one was specified
