@@ -62,12 +62,14 @@ Available Commands:
 
 Flags:
   -c, --config string       config file (default $HOME/.config/kubeconsole)
+      --container string    Container name. If omitted, use the kubectl.kubernetes.io/default-container annotation for selecting the container to be attached or the first container in the pod will be chosen
   -h, --help                help for kubeconsole
       --image string        The image for the container to run. Replaces the image specified in the deployment
       --kubeconfig string   kubeconfig file (default $HOME/.kube/config)
       --limits string       The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests
       --no-rm               Do not remove pod when detaching
-  -l, --selector string     Label selector used to filter the deployments, works the same as the -l flag for kubectl (default "process in (console, rails-shell)")
+      --root                Run pod as root
+  -l, --selector string     Label selector used to filter the deployments, works the same as the -l flag for kubectl (default "process=console")
       --timeout duration    Time that the pod should live after the heartbeat has stopped. For example 15m, 24h (default 15m0s)
   -v, --verbose             Enable verbose
 

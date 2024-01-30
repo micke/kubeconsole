@@ -105,6 +105,7 @@ func init() {
 
 	rootCmd.Flags().StringVarP(&options.LabelSelector, "selector", "l", "process=console", "Label selector used to filter the deployments, works the same as the -l flag for kubectl")
 	rootCmd.Flags().DurationVar(&options.Timeout, "timeout", 15*time.Minute, "Time that the pod should live after the heartbeat has stopped. For example 15m, 24h")
+	rootCmd.Flags().StringVar(&options.ContainerName, "container", "", "Container name. If omitted, use the kubectl.kubernetes.io/default-container annotation for selecting the container to be attached or the first container in the pod will be chosen")
 	rootCmd.Flags().StringVar(&options.Limits, "limits", "", "The resource requirement limits for this container. For example, 'cpu=200m,memory=512Mi'. The specified limits will also be set as requests")
 	rootCmd.Flags().StringVar(&options.Image, "image", "", "The image for the container to run. Replaces the image specified in the deployment")
 	rootCmd.Flags().BoolVarP(&options.NoRm, "no-rm", "", false, "Do not remove pod when detaching")

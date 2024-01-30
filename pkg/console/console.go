@@ -33,6 +33,7 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 	"k8s.io/kubectl/pkg/cmd/attach"
 	"k8s.io/kubectl/pkg/cmd/exec"
+	"k8s.io/kubectl/pkg/cmd/util/podcmd"
 	generateversioned "k8s.io/kubectl/pkg/generate/versioned"
 	"k8s.io/kubectl/pkg/util/interrupt"
 )
@@ -42,6 +43,7 @@ type Options struct {
 	LabelSelector  string
 	Timeout        time.Duration
 	Command        []string
+	ContainerName  string
 	Limits         string
 	Image          string
 	NoRm           bool
@@ -76,6 +78,10 @@ func Start(k8s *k8s.K8s, options Options) {
 		Spec:       deployment.Spec.Template.Spec,
 		ObjectMeta: deployment.Spec.Template.ObjectMeta,
 	}
+	container, err := podcmd.FindOrDefaultContainerByName(pod, options.ContainerName, true, os.Stderr)
+	if err != nil {
+		panic(err)
+	}
 
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
@@ -91,12 +97,12 @@ func Start(k8s *k8s.K8s, options Options) {
 	pod.Annotations["kubeconsole.timeout"] = strconv.Itoa(int(options.Timeout.Minutes()))
 
 	pod.Spec.RestartPolicy = apiv1.RestartPolicyNever
-	pod.Spec.Containers[0].TTY = true
-	pod.Spec.Containers[0].Stdin = true
+	container.TTY = true
+	container.Stdin = true
 
 	// Set command if one was provided
 	if len(options.Command) > 0 {
-		pod.Spec.Containers[0].Command = options.Command
+		container.Command = options.Command
 	}
 
 	// Set default GenerateName if it's not already set
@@ -113,7 +119,7 @@ func Start(k8s *k8s.K8s, options Options) {
 		if err != nil {
 			panic(err)
 		}
-		pod.Spec.Containers[0].Resources = resourceRequirements
+		container.Resources = resourceRequirements
 	}
 
 	// Set security context to run as root
@@ -126,7 +132,7 @@ func Start(k8s *k8s.K8s, options Options) {
 
 	// Set image if one was specified
 	if options.Image != "" {
-		pod.Spec.Containers[0].Image = options.Image
+		container.Image = options.Image
 	}
 
 	// Find existing pod if one exists
@@ -149,6 +155,7 @@ func Start(k8s *k8s.K8s, options Options) {
 
 	attachOpts := &attach.AttachOptions{
 		StreamOptions: exec.StreamOptions{
+			ContainerName: container.Name,
 			IOStreams: genericclioptions.IOStreams{
 				In:     os.Stdin,
 				Out:    os.Stdout,
@@ -420,7 +427,7 @@ func handleAttachPod(podsClient v1.PodInterface, pod *apiv1.Pod, attachOpts *att
 	attachOpts.PodName = pod.Name
 	attachOpts.Namespace = pod.Namespace
 
-	fmt.Print("Attaching...\n")
+	fmt.Printf("Attaching to %s...\n", attachOpts.ContainerName)
 
 	if err := attachOpts.Run(); err != nil {
 		fmt.Fprintf(attachOpts.ErrOut, "Error attaching, falling back to logs: %v\n", err)
