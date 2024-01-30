@@ -34,7 +34,7 @@ archives:
       - completions/*
 
 brews:
-  - tap:
+  - repository:
       owner: micke
       name: homebrew-kubeconsole
     homepage: https://github.com/micke/kubeconsole
