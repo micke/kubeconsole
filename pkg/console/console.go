@@ -383,7 +383,7 @@ func findRunningPod(pod *apiv1.Pod, podsClient v1.PodInterface) *apiv1.Pod {
 	options[0] = "Create a new console pod"
 
 	for i, pod := range pods.Items {
-		options[i+1] = fmt.Sprintf("%s: Creeated %s", pod.Spec.Containers[0].Command, pod.CreationTimestamp)
+		options[i+1] = fmt.Sprintf("%s: Created %s", pod.Spec.Containers[0].Command, pod.CreationTimestamp)
 	}
 
 	prompt := &survey.Select{
