@@ -14,9 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/AlecAivazis/survey/v2/terminal"
 	"github.com/micke/kubeconsole/pkg/k8s"
+	"github.com/micke/kubeconsole/pkg/ui"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -290,17 +289,14 @@ func selectDeployment(allDeployments []appsv1.Deployment, deploymentName string)
 		deploymentNames[i] = d.Name
 	}
 
-	selectedDeployment := 0
-	prompt := &survey.Select{
-		Message: "Choose a deployment:",
-		Options: deploymentNames,
+	options := make([]ui.Option[int], len(deployments))
+	for i, d := range deployments {
+		options[i] = ui.Option[int]{Label: d.Name, Value: i}
 	}
-	err := survey.AskOne(prompt, &selectedDeployment)
-	if err == terminal.InterruptErr {
+	selectedDeployment, err := ui.Select("Choose a deployment:", options)
+	if err != nil {
 		fmt.Println("Cancelled")
 		os.Exit(0)
-	} else if err != nil {
-		panic(err)
 	}
 
 	return &deployments[selectedDeployment]
@@ -385,25 +381,16 @@ func findRunningPod(pod *apiv1.Pod, podsClient v1.PodInterface) *apiv1.Pod {
 		return nil
 	}
 
-	selectedPod := 0
-	options := make([]string, len(pods.Items)+1)
-	options[0] = "Create a new console pod"
-
+	selectOptions := []ui.Option[int]{{Label: "Create a new console pod", Value: 0}}
 	for i, pod := range pods.Items {
-		options[i+1] = fmt.Sprintf("%s: Created %s", pod.Spec.Containers[0].Command, pod.CreationTimestamp)
+		label := fmt.Sprintf("%s: Created %s", pod.Spec.Containers[0].Command, pod.CreationTimestamp)
+		selectOptions = append(selectOptions, ui.Option[int]{Label: label, Value: i + 1})
 	}
 
-	prompt := &survey.Select{
-		Message: "Existing console pod found, would you like to create a new one or attach to an existing one?",
-		Options: options,
-	}
-	err = survey.AskOne(prompt, &selectedPod)
-
-	if err == terminal.InterruptErr {
+	selectedPod, err := ui.Select("Existing console pod found, would you like to create a new one or attach to an existing one?", selectOptions)
+	if err != nil {
 		fmt.Println("Cancelled")
 		os.Exit(0)
-	} else if err != nil {
-		panic(err)
 	}
 
 	if selectedPod == 0 {
