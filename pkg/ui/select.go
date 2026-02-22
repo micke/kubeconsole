@@ -42,14 +42,15 @@ func Select[T any](title string, options []Option[T]) (T, error) {
 }
 
 type selectModel[T any] struct {
-	title    string
-	options  []Option[T]
-	filtered []int
-	cursor   int
-	filter   string
-	height   int
-	offset   int
-	chosen   bool
+	title       string
+	options     []Option[T]
+	filtered    []int
+	cursor      int
+	filter      string
+	height      int
+	offset      int
+	chosen      bool
+	chosenLabel string
 }
 
 func (m selectModel[T]) Init() tea.Cmd {
@@ -65,7 +66,13 @@ func (m selectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyEnter:
 			if len(m.filtered) > 0 {
+				idx := m.filtered[m.cursor]
 				m.chosen = true
+				m.chosenLabel = m.options[idx].Label
+				return m, tea.Sequence(
+					tea.Println(GreenCheck+" "+m.title+" "+selectedStyle.Render(m.chosenLabel)),
+					tea.Quit,
+				)
 			}
 			return m, tea.Quit
 
@@ -134,6 +141,10 @@ var (
 )
 
 func (m selectModel[T]) View() string {
+	if m.chosen {
+		return ""
+	}
+
 	var b strings.Builder
 
 	b.WriteString(titleStyle.Render(m.title))

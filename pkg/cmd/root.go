@@ -47,7 +47,9 @@ kubeconsole production -- /bin/bash`,
 
 		options.MachineID = MachineID
 
-		console.Start(K8sClient, options)
+		if exitCode := console.Start(K8sClient, options); exitCode != 0 {
+			os.Exit(exitCode)
+		}
 	},
 	Args: func(cmd *cobra.Command, args []string) error {
 		argLength := len(args)

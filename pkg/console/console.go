@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/micke/kubeconsole/pkg/k8s"
 	"github.com/micke/kubeconsole/pkg/ui"
 	appsv1 "k8s.io/api/apps/v1"
@@ -56,8 +57,8 @@ var (
 	errInterrupted       = errors.New("interrupted")
 )
 
-// Start the console
-func Start(k8s *k8s.K8s, options Options) {
+// Start the console. Returns the container's exit code (0 if unknown or still running).
+func Start(k8s *k8s.K8s, options Options) int {
 	deployments := k8s.Deployments(options.LabelSelector)
 
 	if len(deployments) == 0 {
@@ -136,21 +137,47 @@ func Start(k8s *k8s.K8s, options Options) {
 
 	// Find existing pod if one exists
 	attachablePod := findRunningPod(pod, podsClient)
+	isNewPod := attachablePod == nil
 
 	// If no running pod is found we will create one
-	if attachablePod == nil {
+	if isNewPod {
 		attachablePod, err = podsClient.Create(context.TODO(), pod, metav1.CreateOptions{})
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("Created pod %s/%s\n", attachablePod.Namespace, attachablePod.Name)
 	}
 
 	if !options.NoRm {
 		defer deletePod(attachablePod, podsClient)
 	}
-	go watchPodEvents(attachablePod, k8s.Clientset)
 	scheduleHeartbeat(attachablePod, podsClient)
+
+	eventStop := make(chan struct{})
+
+	result := ui.RunStartupSpinner(
+		attachablePod.Namespace+"/"+attachablePod.Name,
+		container.Name,
+		isNewPod,
+		func(p *tea.Program) {
+			if isNewPod {
+				go watchPodEvents(attachablePod, k8s.Clientset, p, eventStop)
+			}
+			go func() {
+				pod, err := waitForPod(podsClient, attachablePod, podRunningAndReady)
+				if err != nil {
+					p.Send(ui.PodErrorMsg{Message: err.Error()})
+					return
+				}
+				p.Send(ui.PodReadyMsg{Pod: pod})
+			}()
+		},
+	)
+
+	close(eventStop)
+
+	if result.Cancelled || result.Error != nil {
+		return 0
+	}
 
 	attachOpts := &attach.AttachOptions{
 		StreamOptions: exec.StreamOptions{
@@ -170,10 +197,15 @@ func Start(k8s *k8s.K8s, options Options) {
 		AttachFunc:    attach.DefaultAttachFunc,
 	}
 
-	err = handleAttachPod(podsClient, attachablePod, attachOpts)
-	if err != nil && err != errInterrupted {
-		panic(err)
+	attachOpts.Pod = result.Pod
+	attachOpts.PodName = result.Pod.Name
+	attachOpts.Namespace = result.Pod.Namespace
+
+	if err := attachOpts.Run(); err != nil {
+		fmt.Fprintf(attachOpts.ErrOut, "Error attaching: %v\n", err)
 	}
+
+	return printPodDiagnostics(podsClient, result.Pod.Name, result.Pod.Namespace, container.Name)
 }
 
 // List lists all running console pods
@@ -311,6 +343,71 @@ func deletePod(pod *apiv1.Pod, podsClient v1.PodInterface) {
 	}
 }
 
+func containerTerminated(pod *apiv1.Pod, containerName string) *apiv1.ContainerStateTerminated {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == containerName && cs.State.Terminated != nil {
+			return cs.State.Terminated
+		}
+	}
+	return nil
+}
+
+func printPodDiagnostics(podsClient v1.PodInterface, podName, namespace, containerName string) int {
+	// Poll briefly for terminal container status — the kubelet may not have
+	// updated the pod status yet when the attach session drops.
+	var pod *apiv1.Pod
+	for attempt := 0; attempt < 5; attempt++ {
+		var err error
+		pod, err = podsClient.Get(context.TODO(), podName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				fmt.Fprintf(os.Stderr, "\n%s Pod was terminated\n", ui.RedCross)
+			}
+			return 0
+		}
+
+		if pod.DeletionTimestamp != nil {
+			fmt.Fprintf(os.Stderr, "\n%s Pod was terminated\n", ui.RedCross)
+			return 0
+		}
+
+		if pod.Status.Phase == apiv1.PodFailed || pod.Status.Phase == apiv1.PodSucceeded {
+			break
+		}
+		if containerTerminated(pod, containerName) != nil {
+			break
+		}
+
+		if attempt < 4 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	if t := containerTerminated(pod, containerName); t != nil {
+		switch {
+		case t.Reason == "OOMKilled":
+			fmt.Fprintf(os.Stderr, "\n%s OOMKilled (exit code %d)\n", ui.RedCross, t.ExitCode)
+		case t.ExitCode != 0:
+			fmt.Fprintf(os.Stderr, "\n%s Container exited with code %d\n", ui.RedCross, t.ExitCode)
+		}
+		return int(t.ExitCode)
+	}
+
+	if pod.Status.Phase == apiv1.PodFailed {
+		msg := "Pod failed"
+		if pod.Status.Reason != "" {
+			msg = pod.Status.Reason
+		}
+		if pod.Status.Message != "" {
+			msg += ": " + pod.Status.Message
+		}
+		fmt.Fprintf(os.Stderr, "\n%s %s\n", ui.RedCross, msg)
+		return 1
+	}
+
+	return 0
+}
+
 func waitForPod(podsClient v1.PodInterface, pod *apiv1.Pod, exitCondition watchtools.ConditionFunc) (*apiv1.Pod, error) {
 	// TODO: expose the timeout
 	ctx, cancel := watchtools.ContextWithOptionalTimeout(context.Background(), 0)
@@ -400,28 +497,6 @@ func findRunningPod(pod *apiv1.Pod, podsClient v1.PodInterface) *apiv1.Pod {
 	return &pods.Items[selectedPod-1]
 }
 
-func handleAttachPod(podsClient v1.PodInterface, pod *apiv1.Pod, attachOpts *attach.AttachOptions) error {
-	pod, err := waitForPod(podsClient, pod, podRunningAndReady)
-	if err != nil && err != ErrPodCompleted {
-		return err
-	}
-
-	if pod.Status.Phase == apiv1.PodSucceeded || pod.Status.Phase == apiv1.PodFailed {
-		return fmt.Errorf("Pod failed or ran to completion")
-	}
-
-	attachOpts.Pod = pod
-	attachOpts.PodName = pod.Name
-	attachOpts.Namespace = pod.Namespace
-
-	fmt.Printf("Attaching to %s...\n", attachOpts.ContainerName)
-
-	if err := attachOpts.Run(); err != nil {
-		fmt.Fprintf(attachOpts.ErrOut, "Error attaching, falling back to logs: %v\n", err)
-	}
-	return nil
-}
-
 // ErrPodCompleted is returned by PodRunning or PodContainerRunning to indicate that
 // the pod has already reached completed state.
 var ErrPodCompleted = fmt.Errorf("pod ran to completion")
@@ -455,7 +530,7 @@ func podRunningAndReady(event watch.Event) (bool, error) {
 	return false, nil
 }
 
-func watchPodEvents(pod *apiv1.Pod, clientset *kubernetes.Clientset) {
+func watchPodEvents(pod *apiv1.Pod, clientset *kubernetes.Clientset, program *tea.Program, stop chan struct{}) {
 	fieldSelector := fields.OneTermEqualSelector("involvedObject.uid", string(pod.UID))
 	watchlist := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "events", pod.Namespace, fieldSelector)
 	_, controller := cache.NewInformer(
@@ -465,11 +540,10 @@ func watchPodEvents(pod *apiv1.Pod, clientset *kubernetes.Clientset) {
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				event := obj.(*apiv1.Event)
-				fmt.Printf("%s\n", event.Message)
+				program.Send(ui.PodEventMsg{Message: event.Message})
 			},
 		},
 	)
-	stop := make(chan struct{})
 	controller.Run(stop)
 }
 
